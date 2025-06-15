@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    "guesses": {
+      "$userId": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    "exchange": {
+      "btcusdt": {
+        "current": {
+          ".read": "auth != null",
+          ".write": false
+        }
+      }
+    }
+  }
+}
