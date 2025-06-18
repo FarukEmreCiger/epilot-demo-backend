@@ -2,12 +2,15 @@ import {TaskCreationError} from "../types/errors.types";
 import {TaskPayload} from "../types/api.types";
 import {ITaskService} from "../interfaces/task.interface";
 import {injectable} from "inversify";
+import { config } from "../config/environment";
 
 @injectable()
 export class TaskService implements ITaskService {
   private tasksClient: any;
   private queuePath: string;
 
+  private readonly resolveGuessUrl = `https://${this.location}-${this.projectId}.cloudfunctions.net/resolveGuess`;
+  
   constructor(
     private readonly projectId: string,
     private readonly location: string,
@@ -40,14 +43,17 @@ export class TaskService implements ITaskService {
     const task = {
       httpRequest: {
         httpMethod: "POST" as const,
-        url: `https://${this.location}-${this.projectId}.cloudfunctions.net/resolveGuess`,
+        oidcToken: {
+          serviceAccountEmail: config.serviceAccountEmailForCloudTasks,
+        },
+        url: this.resolveGuessUrl,
         body: Buffer.from(JSON.stringify({data: payload})).toString("base64"),
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json" as const,
         },
       },
       scheduleTime: {
-        seconds: Math.floor(Date.now() / 1000) + delaySeconds,
+        seconds: Date.now() + delaySeconds,
       },
     };
 

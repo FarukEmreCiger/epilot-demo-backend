@@ -1,6 +1,6 @@
 import {Guess} from "../models/guess.model";
 import {User} from "../models/user.model";
-import {GameLogic} from "../core/gameLogic";
+import {GameUtils} from "../core/gameLogic";
 import {ValidationError} from "../types/errors.types";
 import {
   MakeGuessResponse,
@@ -15,12 +15,14 @@ import {TYPES} from "../interfaces/types";
 import {IDatabaseService} from "../interfaces/database.interface";
 import {ITaskService} from "../interfaces/task.interface";
 import { logger } from "firebase-functions/v1";
+import {ILockService} from "../interfaces/lock.interface";
 
 @injectable()
 export class GameService implements IGameService {
   constructor(
     @inject(TYPES.IDatabaseService) private readonly databaseService: IDatabaseService,
-    @inject(TYPES.ITaskService) private readonly taskService: ITaskService
+    @inject(TYPES.ITaskService) private readonly taskService: ITaskService,
+    @inject(TYPES.ILockService) private readonly lockService: ILockService
   ) {}
 
   async makeGuess(
@@ -28,51 +30,62 @@ export class GameService implements IGameService {
     prediction: "up" | "down",
     delaySeconds: number
   ): Promise<MakeGuessResponse> {
-    const user = await this.databaseService.getUser(userId);
-
-    if (user?.activeGuessId) {
-      throw new ValidationError("User already has an active guess");
+    const lockKey = `user_guess_${userId}`;
+    
+    if (!(await this.lockService.acquireLock(lockKey))) {
+      throw new ValidationError("Another guess operation is in progress");
     }
 
-    const currentPrice = await this.databaseService.getBtcPrice();
-    const guessId = GameLogic.generateGuessId();
+    try {
+      const user = await this.databaseService.getUser(userId);
 
-    const newGuess: Guess = {
-      id: guessId,
-      userId,
-      prediction,
-      initialPrice: currentPrice,
-      createdAt: Date.now(),
-      status: "pending",
-      resolvedPrice: null,
-      resolvedAt: null,
-      result: null,
-    };
+      if (user?.activeGuessId) {
+        throw new ValidationError("User already has an active guess");
+      }
 
-    const updates: DatabaseUpdatePayload = {
-      [`guesses/${userId}/${guessId}`]: newGuess,
-    };
+      const currentPrice = await this.databaseService.getBtcPrice();
+      const guessId = GameUtils.generateGuessId();
 
-    if (!user) {
-      const newUser: User = {
-        uid: userId,
-        score: 0,
-        activeGuessId: guessId,
+      const newGuess: Guess = {
+        id: guessId,
+        userId,
+        prediction,
+        initialPrice: currentPrice,
+        createdAt: Date.now(),
+        status: "pending",
+        resolvedPrice: null,
+        resolvedAt: null,
+        result: null,
+        guessResolveDelay: delaySeconds,
       };
-      updates[`users/${userId}`] = newUser;
-    } else {
-      updates[`users/${userId}/activeGuessId`] = guessId;
+
+      const updates: DatabaseUpdatePayload = {
+        [`guesses/${userId}/${guessId}`]: newGuess,
+      };
+
+      if (!user) {
+        const newUser: User = {
+          uid: userId,
+          score: 0,
+          activeGuessId: guessId,
+        };
+        updates[`users/${userId}`] = newUser;
+      } else {
+        updates[`users/${userId}/activeGuessId`] = guessId;
+      }
+
+      await this.taskService.createResolveGuessTask(userId, guessId, delaySeconds);
+      await this.databaseService.atomicUpdate(updates);
+
+      return {
+        success: true,
+        guessId,
+        initialPrice: currentPrice,
+        message: "Guess successfully created",
+      };
+    } finally {
+      await this.lockService.releaseLock(lockKey);
     }
-
-    await this.taskService.createResolveGuessTask(userId, guessId, delaySeconds);
-    await this.databaseService.atomicUpdate(updates);
-
-    return {
-      success: true,
-      guessId,
-      initialPrice: currentPrice,
-      message: "Guess successfully created",
-    };
   }
 
   /*
@@ -82,75 +95,70 @@ export class GameService implements IGameService {
   */
   async resolveGuess(userId: string, guessId: string): Promise<ResolveGuessResponse> {
     logger.info("resolveGuess", userId, guessId);
-    const guess = await this.databaseService.getGuess(userId, guessId);
-    const userScore = await this.databaseService.getUserScore(userId);
-
-    if (!guess) {
+    
+    const lockKey = `resolve_guess_${userId}_${guessId}`;
+    
+    if (!(await this.lockService.acquireLock(lockKey))) {
       return {
         success: false,
-        message: "Guess not found",
+        message: "Guess resolution already in progress",
       };
     }
 
-    if (guess.status !== "pending") {
-      return {
-        success: false,
-        message: "Guess already resolved",
-      };
-    }
+    try {
+      const guess = await this.databaseService.getGuess(userId, guessId);
+      const userScore = await this.databaseService.getUserScore(userId);
 
-    const currentPrice = await this.databaseService.getBtcPrice();
-    const result = GameLogic.determineGuessResult(
-      guess.prediction,
-      guess.initialPrice,
-      currentPrice
-    );
-
-    let scoreChange = GameLogic.calculateScoreChange(result);
-    if (userScore + scoreChange < 0) {
-      scoreChange = 0;
-    }
-
-    interface TransactionData {
-      guesses?: {
-        [userId: string]: {
-          [guessId: string]: Guess;
+      if (!guess) {
+        return {
+          success: false,
+          message: "Guess not found",
         };
-      };
-      users?: {
-        [userId: string]: User;
-      };
-    }
-
-    await this.databaseService.transactionUpdate<TransactionData>(
-      "/",
-      (current) => {
-        if (!current) return current;
-
-        if (current.guesses?.[userId]?.[guessId]) {
-          const currentGuess = current.guesses[userId][guessId];
-          currentGuess.status = "resolved";
-          currentGuess.resolvedPrice = currentPrice;
-          currentGuess.resolvedAt = Date.now();
-          currentGuess.result = result;
-        }
-
-        if (current.users?.[userId]) {
-          current.users[userId].score += scoreChange;
-          current.users[userId].activeGuessId = null;
-        }
-
-        return current;
       }
-    );
 
-    return {
-      success: true,
-      message: "Guess resolved successfully",
-      result,
-      scoreChange,
-      resolvedPrice: currentPrice,
-    };
+      if (guess.status !== "pending") {
+        return {
+          success: false,
+          message: "Guess already resolved",
+        };
+      }
+
+      if (guess.createdAt + (guess.guessResolveDelay ?? 0) * 1000 >= Date.now()) {
+        throw new ValidationError("Guess resolution time hasn't passed yet");
+      }
+
+      const currentPrice = await this.databaseService.getBtcPrice();
+      let {result, scoreChange} = GameUtils.determineGuessResult(
+        guess.prediction,
+        guess.initialPrice,
+        currentPrice
+      );
+
+      if (userScore + scoreChange < 0) {
+        scoreChange = 0;
+      }
+
+      const updates: DatabaseUpdatePayload = {
+        [`guesses/${userId}/${guessId}/status`]: "resolved",
+        [`guesses/${userId}/${guessId}/resolvedPrice`]: currentPrice,
+        [`guesses/${userId}/${guessId}/resolvedAt`]: Date.now(),
+        [`guesses/${userId}/${guessId}/result`]: result,
+        [`users/${userId}/score`]: userScore + scoreChange,
+        [`users/${userId}/activeGuessId`]: null,
+      };
+
+      await this.databaseService.atomicUpdate(updates);
+
+      return {
+        success: true,
+        message: "Guess resolved successfully",
+        result,
+        scoreChange,
+        resolvedPrice: currentPrice,
+      };
+    } finally {
+      await this.lockService. releaseLock(lockKey);
+    }
   }
 
   async getLeaderboard(limit = 10): Promise<GetLeaderboardResponse> {

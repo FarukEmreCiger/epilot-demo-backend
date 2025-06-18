@@ -25,3 +25,10 @@ export class PriceDataError extends Error {
     this.name = "PriceDataError";
   }
 }
+
+export class UnauthenticatedError extends Error {
+  constructor(message: string, public readonly source?: string) {
+    super(message);
+    this.name = "UnauthenticatedError";
+  }
+}

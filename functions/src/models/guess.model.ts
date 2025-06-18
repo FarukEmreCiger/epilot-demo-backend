@@ -8,4 +8,5 @@ export interface Guess {
   resolvedPrice: number | null;
   resolvedAt: number | null;
   result: "correct" | "incorrect" | null;
+  guessResolveDelay: number | null;
 }

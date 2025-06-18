@@ -1,3 +1,7 @@
+export interface Auth {
+  uid: string;
+}
+
 export interface MakeGuessRequest {
   prediction: "up" | "down";
 }

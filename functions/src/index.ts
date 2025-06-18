@@ -4,7 +4,6 @@ import {logger} from "firebase-functions";
 import {GameController} from "./controllers/game.controller";
 import {config} from "./config/environment";
 import {IGameService} from "./interfaces/game.interface";
-import {IValidationService} from "./interfaces/validation.interface";
 import {TYPES} from "./interfaces/types";
 
 setGlobalOptions({region: config.region});
@@ -16,7 +15,6 @@ import DI_CONTAINER from "./di";
 
 const gameController = new GameController(
   DI_CONTAINER.get<IGameService>(TYPES.IGameService),
-  DI_CONTAINER.get<IValidationService>(TYPES.IValidationService)
 );
 
 export const makeGuess = gameController.makeGuess;

@@ -1,29 +1,24 @@
 
-export class GameLogic {
+export class GameUtils {
   static determineGuessResult(
     prediction: "up" | "down",
     initialPrice: number,
     resolvedPrice: number
-  ): "correct" | "incorrect" {
+  ): { result: "correct" | "incorrect", scoreChange: number } {
+    const correct = { result: "correct", scoreChange: 1 } as const;
+    const incorrect = { result: "incorrect", scoreChange: -1 } as const;
+
     const priceWentUp = resolvedPrice > initialPrice;
 
     if (prediction === "up" && priceWentUp) {
-      return "correct";
+      return correct;
     }
 
     if (prediction === "down" && !priceWentUp) {
-      return "correct";
+      return correct;
     }
 
-    return "incorrect";
-  }
-
-  static calculateScoreChange(result: "correct" | "incorrect"): number {
-    return result === "correct" ? 1 : -1;
-  }
-
-  static isValidPrediction(prediction: unknown): prediction is "up" | "down" {
-    return prediction === "up" || prediction === "down";
+    return incorrect;
   }
 
   static generateGuessId(): string {

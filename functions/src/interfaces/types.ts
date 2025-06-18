@@ -3,5 +3,6 @@ export const TYPES = {
   IGameService: Symbol.for("IGameService"),
   ITaskService: Symbol.for("ITaskService"),
   IValidationService: Symbol.for("IValidationService"),
-  Database: Symbol.for("Database")
+  Database: Symbol.for("Database"),
+  ILockService: Symbol.for("ILockService"),
 };
