@@ -53,7 +53,7 @@ export class TaskService implements ITaskService {
         },
       },
       scheduleTime: {
-        seconds: Date.now() + delaySeconds,
+        seconds: Math.ceil(Date.now() / 1000) + delaySeconds,
       },
     };
 
