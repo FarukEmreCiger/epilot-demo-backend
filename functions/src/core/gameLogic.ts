@@ -9,12 +9,13 @@ export class GameUtils {
     const incorrect = { result: "incorrect", scoreChange: -1 } as const;
 
     const priceWentUp = resolvedPrice > initialPrice;
+    const priceWentDown = resolvedPrice < initialPrice;
 
     if (prediction === "up" && priceWentUp) {
       return correct;
     }
 
-    if (prediction === "down" && !priceWentUp) {
+    if (prediction === "down" && priceWentDown) {
       return correct;
     }
 
